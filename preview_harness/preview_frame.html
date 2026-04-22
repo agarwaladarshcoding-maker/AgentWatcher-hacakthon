@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentWatch</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+
+  <header class="header">
+    <div class="header-brand">
+      <div class="brand-icon" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
+          <circle cx="8" cy="8" r="7" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="8" cy="8" r="3" fill="#fff"/>
+          <circle cx="8" cy="8" r="1.2" fill="#0ea5e9"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <div class="brand-name">AgentWatch</div>
+        <div class="brand-sub">AI Agent Monitor</div>
+      </div>
+    </div>
+    <label class="toggle">
+      <input type="checkbox" id="global-toggle" checked>
+      <span class="toggle-track"></span>
+    </label>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab" data-tab="monitor" role="tab">Monitor</button>
+    <button class="tab" data-tab="history" role="tab">History</button>
+    <button class="tab" data-tab="settings" role="tab">Settings</button>
+  </nav>
+
+  <main class="content" id="content" role="tabpanel"></main>
+
+  <footer class="footer">
+    <span class="footer-stat" id="footer-stat">2 active · 7 today</span>
+    <span class="mac-status"><span class="mac-dot connected" id="mac-dot"></span><span id="mac-label">Mac App</span></span>
+  </footer>
+
+  <div id="modal-root" class="modal-root" aria-hidden="true"></div>
+
+  <script>
+    // Stub chrome.* APIs with seeded sample data based on URL
+    const params = new URLSearchParams(location.search);
+    const which = params.get('tab') || 'monitor';
+    const reply = params.get('reply') === '1';
+    const empty = params.get('empty') === '1';
+
+    const sampleSessions = empty ? {} : {
+      101: { tabId: 101, windowId: 1, site: 'chatgpt',  siteName: 'ChatGPT', url: 'https://chatgpt.com', title: 'Help me refactor my React hook', startTime: Date.now() - 47000 },
+      102: { tabId: 102, windowId: 1, site: 'claude',   siteName: 'Claude',  url: 'https://claude.ai', title: 'Long-form article draft on macOS menu bar apps', startTime: Date.now() - 132000 },
+    };
+
+    const sampleHistory = [
+      { id: 'e1', tabId: 101, site: 'chatgpt', siteName: 'ChatGPT',   eventType: 'COMPLETED',  responseLength: 2340, durationMs: 18400, timestamp: new Date(Date.now() - 30000).toISOString(), url: 'https://chatgpt.com' },
+      { id: 'e2', tabId: 103, site: 'claude',  siteName: 'Claude',    eventType: 'DECISION',   responseLength: 0,    durationMs: 11200, timestamp: new Date(Date.now() - 240000).toISOString(), url: 'https://claude.ai' },
+      { id: 'e3', tabId: 104, site: 'gemini',  siteName: 'Gemini',    eventType: 'ERROR',      responseLength: 0,    durationMs: 3400,  timestamp: new Date(Date.now() - 1600000).toISOString(), url: 'https://gemini.google.com' },
+      { id: 'e4', tabId: 105, site: 'perplex', siteName: 'Perplexity',eventType: 'BLOCKED',    responseLength: 0,    durationMs: 30000, timestamp: new Date(Date.now() - 3400000).toISOString(), url: 'https://perplexity.ai' },
+      { id: 'e5', tabId: 106, site: 'grok',    siteName: 'Grok',      eventType: 'PERMISSION', responseLength: 800,  durationMs: 9000,  timestamp: new Date(Date.now() - 7200000).toISOString(), url: 'https://grok.com' },
+      { id: 'e6', tabId: 107, site: 'groq',    siteName: 'Groq',      eventType: 'COMPLETED',  responseLength: 4800, durationMs: 2300,  timestamp: new Date(Date.now() - 86400000).toISOString(), url: 'https://groq.com' },
+    ];
+
+    const storage = {
+      activeSessions: sampleSessions,
+      history: sampleHistory,
+      settings: { globalDisabled: false, soundDisabled: false, sites: { character: { disabled: true } } },
+      pendingReply: reply ? {
+        tabId: 102, windowId: 1, site: 'claude', siteName: 'Claude', eventType: 'DECISION',
+        timestamp: new Date().toISOString(),
+      } : undefined,
+      macAppConnected: true,
+    };
+
+    window.chrome = {
+      storage: {
+        local: {
+          get: async (keys) => {
+            const out = {};
+            const list = Array.isArray(keys) ? keys : (typeof keys === 'string' ? [keys] : Object.keys(storage));
+            for (const k of list) out[k] = storage[k];
+            return out;
+          },
+          set: async (obj) => { Object.assign(storage, obj); },
+          remove: async (keys) => {
+            const list = Array.isArray(keys) ? keys : [keys];
+            for (const k of list) delete storage[k];
+          },
+        },
+        onChanged: { addListener: () => {} },
+      },
+      runtime: { sendMessage: async () => {} },
+      tabs: { update: async () => {}, create: () => {} },
+      windows: { update: async () => {} },
+    };
+
+    // After the stubs are ready, load popup.js and activate the requested tab.
+    const s = document.createElement('script');
+    s.src = 'popup.js';
+    s.onload = () => {
+      // popup.js registers a DOMContentLoaded handler which already fired
+      // in this dynamic load scenario; re-dispatch to trigger init.
+      document.dispatchEvent(new Event('DOMContentLoaded'));
+      setTimeout(() => {
+        const btn = document.querySelector(`.tab[data-tab="${which}"]`);
+        if (btn && which !== 'monitor') btn.click();
+      }, 200);
+    };
+    document.body.appendChild(s);
+  </script>
+</body>
+</html>

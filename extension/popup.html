@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentWatch</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+
+  <!-- Header -->
+  <header class="header">
+    <div class="header-brand">
+      <div class="brand-icon" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
+          <circle cx="8" cy="8" r="7" stroke="#fff" stroke-width="1.5"/>
+          <circle cx="8" cy="8" r="3" fill="#fff"/>
+          <circle cx="8" cy="8" r="1.2" fill="#0ea5e9"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <div class="brand-name">AgentWatch</div>
+        <div class="brand-sub">AI Agent Monitor</div>
+      </div>
+    </div>
+    <label class="toggle" title="Enable/Disable notifications">
+      <input type="checkbox" id="global-toggle" data-testid="global-toggle" checked>
+      <span class="toggle-track"></span>
+    </label>
+  </header>
+
+  <!-- Tabs -->
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="monitor" role="tab" data-testid="tab-monitor">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      Monitor
+    </button>
+    <button class="tab" data-tab="history" role="tab" data-testid="tab-history">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      History
+    </button>
+    <button class="tab" data-tab="settings" role="tab" data-testid="tab-settings">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+      Settings
+    </button>
+  </nav>
+
+  <!-- Content -->
+  <main class="content" id="content" role="tabpanel">
+    <div class="loading-state">
+      <div class="spinner"></div>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <span class="footer-stat" id="footer-stat" data-testid="footer-stat">Loading…</span>
+    <span class="mac-status" id="mac-status" data-testid="mac-app-status" title="macOS Menu Bar App">
+      <span class="mac-dot" id="mac-dot"></span>
+      <span id="mac-label">Chrome only</span>
+    </span>
+  </footer>
+
+  <!-- Modal host (used for confirm dialogs & event preview) -->
+  <div id="modal-root" class="modal-root" data-testid="modal-root" aria-hidden="true"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

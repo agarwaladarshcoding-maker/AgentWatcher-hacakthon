@@ -1,0 +1,108 @@
+{
+  "manifest_version": 3,
+  "name": "AgentWatch",
+  "version": "1.4.0",
+  "description": "Stop babysitting AI agents. Get notified the instant they finish, get stuck, or need your input.",
+  "permissions": ["notifications", "tabs", "storage", "windows", "offscreen", "system.display", "alarms"],
+  "host_permissions": ["<all_urls>", "http://localhost:11434/*", "http://127.0.0.1:11434/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chat.openai.com/*",
+        "https://chatgpt.com/*",
+        "https://claude.ai/*",
+        "https://console.anthropic.com/*",
+        "https://gemini.google.com/*",
+        "https://aistudio.google.com/*",
+        "https://www.perplexity.ai/*",
+        "https://perplexity.ai/*",
+        "https://copilot.microsoft.com/*",
+        "https://grok.com/*",
+        "https://x.ai/*",
+        "https://meta.ai/*",
+        "https://www.meta.ai/*",
+        "https://poe.com/*",
+        "https://www.phind.com/*",
+        "https://you.com/*",
+        "https://huggingface.co/chat/*",
+        "https://chat.mistral.ai/*",
+        "https://groq.com/*",
+        "https://chat.deepseek.com/*",
+        "https://pi.ai/*",
+        "https://character.ai/*",
+        "https://coral.cohere.com/*",
+        "https://www.bing.com/chat*",
+        "https://emergent.sh/*",
+        "https://app.emergent.sh/*",
+        "https://lmsys.org/*",
+        "https://chat.lmsys.org/*",
+        "https://together.ai/*",
+        "https://api.together.ai/*"
+      ],
+      "js": ["fetch_patcher.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://chat.openai.com/*",
+        "https://chatgpt.com/*",
+        "https://claude.ai/*",
+        "https://console.anthropic.com/*",
+        "https://gemini.google.com/*",
+        "https://aistudio.google.com/*",
+        "https://www.perplexity.ai/*",
+        "https://perplexity.ai/*",
+        "https://copilot.microsoft.com/*",
+        "https://grok.com/*",
+        "https://x.ai/*",
+        "https://meta.ai/*",
+        "https://www.meta.ai/*",
+        "https://poe.com/*",
+        "https://www.phind.com/*",
+        "https://you.com/*",
+        "https://huggingface.co/chat/*",
+        "https://chat.mistral.ai/*",
+        "https://groq.com/*",
+        "https://chat.deepseek.com/*",
+        "https://pi.ai/*",
+        "https://character.ai/*",
+        "https://coral.cohere.com/*",
+        "https://www.bing.com/chat*",
+        "https://emergent.sh/*",
+        "https://app.emergent.sh/*",
+        "https://lmsys.org/*",
+        "https://chat.lmsys.org/*",
+        "https://together.ai/*",
+        "https://api.together.ai/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "AgentWatch — AI Monitor",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["sounds/notification.mp3", "offscreen.html", "llm_router.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

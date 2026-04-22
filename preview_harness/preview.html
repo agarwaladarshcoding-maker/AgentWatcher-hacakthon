@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>AgentWatch Preview</title>
+  <style>
+    body { margin: 0; padding: 40px; background: #1a1d27; display: flex; gap: 30px; flex-wrap: wrap;
+           justify-content: center; font-family: -apple-system, sans-serif; }
+    .frame { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+    .frame iframe { width: 380px; height: 600px; border: 1px solid #333; border-radius: 12px;
+                    background: #07090d; box-shadow: 0 10px 40px rgba(0,0,0,0.6); }
+    .frame label { color: #ccc; font-size: 13px; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="frame"><label>Monitor (with Reply Panel)</label><iframe src="/app/extension/preview_frame.html?tab=monitor&reply=1"></iframe></div>
+  <div class="frame"><label>Monitor (empty)</label><iframe src="/app/extension/preview_frame.html?tab=monitor&empty=1"></iframe></div>
+  <div class="frame"><label>History</label><iframe src="/app/extension/preview_frame.html?tab=history"></iframe></div>
+  <div class="frame"><label>Settings</label><iframe src="/app/extension/preview_frame.html?tab=settings"></iframe></div>
+</body>
+</html>
