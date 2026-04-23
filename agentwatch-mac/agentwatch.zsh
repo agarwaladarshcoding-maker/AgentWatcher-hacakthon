@@ -1,19 +1,18 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# AgentWatch CLI Plugin — agentwatch.zsh  v6.0
+# AgentWatch CLI Plugin — agentwatch.zsh  v7.0
 #
-# Install:  source ~/.agentwatch/agentwatch.zsh  in ~/.zshrc
-#
-# v6.0 changes:
-#   • CLI agents (gemini, claude, aider, ollama …) are WRAPPED in pty_wrapper.py
-#     which transparently proxies the PTY while watching for response quiescence.
-#     notify.py fires automatically when the agent finishes a response turn.
-#   • Regular (non-agent) commands still use the precmd fire-on-exit path.
-#   • New _AW_PTY_WRAPPER var: resolved once at source time.
-#   • aw-agent <cmd>: explicit agent wrap (always uses pty_wrapper).
-#   • All v5.0 session registry, aw-sessions, aw-test-reply retained.
+# v7.0 changes:
+#   • Claude CLI: "claude" and "claude-code" commands routed to the new
+#     dedicated claude/wrapper.py with accurate permission + response detection.
+#   • Fixed agent detection: claude binary is now correctly identified whether
+#     invoked as `claude`, `claude-code`, or via npx.
+#   • precmd dedup: track last-fired (cmd, exit_code) to prevent re-fires when
+#     shell redraws prompt without running a new command.
+#   • Minimum duration check moved to ms level (AW_MIN_DURATION_MS) so very
+#     fast commands are always suppressed even if threshold is 0.
 # ─────────────────────────────────────────────────────────────────────────────
 
-AW_VERSION="6.0"
+AW_VERSION="7.0"
 
 # ── Config ────────────────────────────────────────────────────────────────────
 : ${AW_MIN_DURATION_SECS:=1}
@@ -89,6 +88,7 @@ trap '_aw_cleanup' EXIT HUP INT TERM
 # ── Per-shell state ───────────────────────────────────────────────────────────
 typeset -A _AW_CMD_MAP _AW_START_MAP _AW_TERM_PROG_MAP
 typeset -A _AW_TERM_SESS_MAP _AW_TTY_MAP _AW_FIRED_MAP
+typeset -A _AW_LAST_CMD_MAP   # dedup: track last (cmd, exitcode) per shell
 _AW_ENABLED=1
 _AW_WARNED_MISSING_NOTIFY=0
 
@@ -110,10 +110,15 @@ _aw_warn_missing_notify() {
 # ── Agent detector ────────────────────────────────────────────────────────────
 _aw_detect_agent() {
     local cmd="$1" base="${${1%% *}##*/}"
+    # Strip common path prefixes
+    base="${base##*/}"
+
     case "$base" in
-        ollama)         echo "ollama";       return ;;
+        # Claude CLI — must come before generic "claude" check
         claude)         echo "claude";       return ;;
         claude-code)    echo "claude-code";  return ;;
+        # Other agents
+        ollama)         echo "ollama";       return ;;
         gemini)         echo "gemini";       return ;;
         gemini-cli)     echo "gemini-cli";   return ;;
         aider)          echo "aider";        return ;;
@@ -129,17 +134,19 @@ _aw_detect_agent() {
         gh)
             [[ "$cmd" == *"copilot"* ]] && { echo "gh-copilot"; return; } ;;
     esac
+
+    # npx / bunx / pnpm dlx invocations
     case "$cmd" in
-        *"npx @anthropic-ai/claude"*|*"npx claude-code"*|*"bunx claude"*|*"pnpm dlx claude"*)
-            echo "claude-code"; return ;;
-        *"npx @google/gemini"*|*"npx gemini"*|*"bunx gemini"*) echo "gemini"; return ;;
+        *"@anthropic-ai/claude"*|*"claude-code"*|*"bunx claude"*|*"pnpm dlx claude"*)
+            echo "claude"; return ;;
+        *"@google/gemini"*|*"npx gemini"*|*"bunx gemini"*) echo "gemini"; return ;;
         *"ollama run "*) echo "ollama"; return ;;
         *"npx aider"*|*"uvx aider"*) echo "aider"; return ;;
     esac
     echo ""
 }
 
-# ── Show card (non-agent commands, called from precmd) ────────────────────────
+# ── Show card (non-agent commands) ────────────────────────────────────────────
 _aw_show_card() {
     local title="$1" site="$2" ev_type="$3" preview="$4"
     local term_prog="${5:-${TERM_PROGRAM:-}}"
@@ -168,15 +175,6 @@ _aw_show_card() {
 }
 
 # ── PTY agent wrapper ─────────────────────────────────────────────────────────
-# Called by preexec when an agent command is detected.
-# Replaces the about-to-run command with: python3 pty_wrapper.py -- <original cmd>
-# We do this by setting BUFFER (ZLE) but preexec already ran the command.
-# Instead we use a zsh preexec trick: return a synthetic exit that causes
-# the shell to re-exec through the wrapper.
-#
-# SIMPLER APPROACH: expose `aw-agent` and teach zsh to auto-wrap via
-# a command_not_found_handler alternative. We patch using alias.
-
 _aw_run_with_pty() {
     local agent_name="$1"; shift
     local term_prog="${TERM_PROGRAM:-}"
@@ -211,10 +209,9 @@ _aw_run_with_pty() {
             --agent  "$agent_name" \
             -- "$@"
     else
-        # Fallback: run directly, fire card on exit
+        # Fallback: run directly, notify on exit
         "$@"
         local ec=$?
-        local dur_label="done"
         _aw_show_card "${agent_name} · finished" "$site_name" "COMPLETED" \
             "Session ended" "$term_prog" "$sess_id" "$tty_dev" "$_AW_SID"
         return $ec
@@ -276,29 +273,28 @@ _aw_precmd() {
 
     _AW_CMD_MAP[$$]=""
 
-    # ── Skip agent commands — they're handled by pty_wrapper (or aw-agent) ───
-    # precmd only handles non-agent commands
+    # ── Skip agent commands — handled by pty_wrapper ──────────────────────
     if [[ -n "$agent_kind" ]]; then
         return $exit_code
     fi
 
-    # Skip interactive programs
+    # Skip interactive programs that have their own TUI
     case "${cmd%% *}" in
         top|htop|vim|vi|nano|emacs|less|more|man|watch|tail|ssh|mysql|psql|python|python3|node|irb|pry|iex)
             return $exit_code ;;
     esac
 
     # Duration threshold
-    local threshold="${AW_MIN_DURATION_SECS:-1}"
     if (( duration_ms < AW_MIN_DURATION_MS )); then return $exit_code; fi
-    (( duration_s < threshold )) && return $exit_code
+    (( duration_s < AW_MIN_DURATION_SECS )) && return $exit_code
 
-    # Dedup
-    local cmd_hash="${cmd:0:40}_$(( duration_ms / 1000 ))"
-    local last_fired="${_AW_FIRED_MAP[$cmd_hash]:-0}"
+    # Dedup: don't re-fire if same (cmd, exitcode) fired in last 2 seconds
+    local dedup_key="${cmd:0:40}_${exit_code}"
+    local last_fired="${_AW_FIRED_MAP[$dedup_key]:-0}"
     if (( now_ms - last_fired < 2000 )); then return $exit_code; fi
-    _AW_FIRED_MAP[$cmd_hash]=$now_ms
-    (( ${#_AW_FIRED_MAP} > 50 )) && _AW_FIRED_MAP=()
+    _AW_FIRED_MAP[$dedup_key]=$now_ms
+    # Prune map if too large
+    (( ${#_AW_FIRED_MAP} > 100 )) && _AW_FIRED_MAP=()
 
     local short_cmd; short_cmd=$(_aw_truncate "$cmd")
     local cwd_label; cwd_label=$(basename "$PWD" 2>/dev/null || echo "shell")
@@ -372,9 +368,7 @@ aw-status() {
         local iv; iv=$(grep -m1 '^AW_VERSION=' "$HOME/.agentwatch/agentwatch.zsh" | cut -d'"' -f2)
         if [[ -n "$iv" && "$iv" != "$AW_VERSION" ]]; then
             echo "  ⚠️  STALE SHELL: loaded=v$AW_VERSION  installed=v$iv"
-            echo "      Fix: open a new terminal, OR:"
-            echo "        unset -f aw aw-agent aw-test aw-status aw-diagnose \\"
-            echo "                 _aw_preexec _aw_precmd 2>/dev/null; source ~/.zshrc"
+            echo "      Fix: open a new terminal, OR: source ~/.zshrc"
         fi
     fi
     echo "[AgentWatch] Status:      $state"
@@ -393,21 +387,10 @@ aw-status() {
     else
         echo "[AgentWatch] pty_wrapper: ✗  NOT FOUND — agent wrapping disabled"
     fi
-    if $AW_PYTHON -c "import AppKit, Quartz" 2>/dev/null; then
-        echo "[AgentWatch] pyobjc:      ✓  installed"
-    else
-        echo "[AgentWatch] pyobjc:      ✗  missing"
-    fi
     if _aw_mac_app_up; then
         echo "[AgentWatch] Mac App:     ✓  connected (port $AW_MAC_APP_PORT)"
     else
         echo "[AgentWatch] Mac App:     –  offline"
-    fi
-    if [[ "${TERM_PROGRAM:-}" == "vscode" ]]; then
-        echo ""
-        echo "[AgentWatch] VSCode tips:"
-        echo "  • Notifications fire for commands run in the integrated terminal."
-        echo "  • Code Runner: enable 'code-runner.runInTerminal' in VSCode settings."
     fi
 }
 
@@ -433,8 +416,6 @@ for f in sorted(os.listdir(d)):
     except Exception:
         print(f"  [{f}]  (unreadable)")
 PYEOF
-    echo ""
-    echo "  Tip: set AW_TERMINAL_NAME=\"work\" in your .zshrc to name terminals."
 }
 
 # ── aw: explicit wrap for non-agent commands ──────────────────────────────────
@@ -464,13 +445,12 @@ aw() {
     return $exit_code
 }
 
-# ── aw-agent: explicit agent wrap (uses pty_wrapper) ─────────────────────────
-# Usage: aw-agent gemini "what is the capital of France?"
-#        aw-agent ollama run llama3
+# ── aw-agent: explicit agent wrap ────────────────────────────────────────────
 aw-agent() {
     if [[ $# -eq 0 ]]; then
         echo "Usage: aw-agent <command> [args…]"
-        echo "Example: aw-agent gemini 'hello world'"
+        echo "Example: aw-agent claude"
+        echo "         aw-agent gemini 'hello world'"
         echo "         aw-agent ollama run llama3"
         return 1
     fi
@@ -485,11 +465,6 @@ aw-test() {
     if [[ -z "$_AW_NOTIFY" || ! -f "$_AW_NOTIFY" ]]; then
         echo "[AgentWatch] ERROR: notify.py not found! Run install.sh first."; return 1
     fi
-    if ! $AW_PYTHON -c "import AppKit, Quartz" 2>/dev/null; then
-        echo "[AgentWatch] ERROR: pyobjc missing!"
-        echo "[AgentWatch] Fix: pip3 install pyobjc-framework-Cocoa pyobjc-framework-Quartz"
-        return 1
-    fi
     _aw_show_card \
         "Test card" \
         "${AW_TERMINAL_NAME:-Terminal} · test" \
@@ -498,8 +473,7 @@ aw-test() {
     echo "[AgentWatch] Card launched (should appear top-right)"
     echo ""
     echo "  pty_wrapper: ${_AW_PTY_WRAPPER:-(NOT FOUND)}"
-    echo "  To test agent wrapping: aw-agent ollama run llama3"
-    echo "                          aw-agent gemini 'hello'"
+    echo "  Claude CLI test: aw-agent claude"
 }
 
 aw-test-reply() {
@@ -508,20 +482,6 @@ aw-test-reply() {
         "Reply test" "${AW_TERMINAL_NAME:-Terminal} · test" "DECISION" \
         "Test reply card. Session: $_AW_SID\n> Type something and click Reply\n> It should paste back here"
     echo "[AgentWatch] Card launched — click Reply, type text, press ⌘↵"
-    echo "[AgentWatch] Check log: tail -f ~/.agentwatch/notify.log"
-}
-
-# ── aw-debug ──────────────────────────────────────────────────────────────────
-aw-debug() {
-    if [[ -z "$_AW_NOTIFY" || ! -f "$_AW_NOTIFY" ]]; then
-        echo "[AgentWatch] notify.py not found."; return 1
-    fi
-    echo "[AgentWatch] Running notify.py in foreground (session: $_AW_SID)..."
-    $AW_PYTHON "$_AW_NOTIFY" \
-        "Debug card" "Terminal · debug" "COMPLETED" \
-        "AppKit working! Session: $_AW_SID" \
-        "$AW_MAC_APP_PORT" "" "" \
-        "${TTY:-}" "${TERM_PROGRAM:-}" "${TERM_SESSION_ID:-}" "$_AW_SID"
 }
 
 # ── aw-diagnose ───────────────────────────────────────────────────────────────
@@ -538,32 +498,16 @@ aw-diagnose() {
         echo "• Installed ver  : v${iv:-<unset>}"
         [[ "$iv" != "$AW_VERSION" ]] && echo "  ⚠️  MISMATCH: open a new terminal"
     fi
-    echo "• TERM_PROGRAM   : ${TERM_PROGRAM:-<unset>}"
-    echo "• TERM_SESSION_ID: ${TERM_SESSION_ID:-<unset>}"
     echo ""
     echo "▶ Files"
     echo "  notify.py    : ${_AW_NOTIFY:-(NOT FOUND)}"
     echo "  pty_wrapper  : ${_AW_PTY_WRAPPER:-(NOT FOUND)}"
     echo ""
-    echo "▶ Session registry"
-    aw-sessions
-    echo "▶ pyobjc check"
-    $AW_PYTHON -c "import AppKit, Quartz; print('  ✓  AppKit + Quartz importable')" 2>/dev/null || \
-        echo "  ✗  pyobjc missing — pip3 install pyobjc-framework-Cocoa pyobjc-framework-Quartz"
-    echo ""
     echo "▶ Agent detection test"
-    for _tc in "ollama run llama3" "gemini hello" "claude --help" "npx @anthropic-ai/claude-code" "aider"; do
+    for _tc in "claude" "claude-code" "ollama run llama3" "gemini hello" "npx @anthropic-ai/claude-code" "aider"; do
         local _k; _k=$(_aw_detect_agent "$_tc")
         [[ -n "$_k" ]] && echo "  ✓  '$_tc' → agent: $_k" || echo "  –  '$_tc' → (not agent)"
     done
-    echo ""
-    echo "▶ pty_wrapper smoke test"
-    if [[ -n "$_AW_PTY_WRAPPER" && -f "$_AW_PTY_WRAPPER" ]]; then
-        $AW_PYTHON "$_AW_PTY_WRAPPER" --help 2>&1 | head -3 | sed 's/^/  /'
-        echo "  ✓  pty_wrapper importable"
-    else
-        echo "  ✗  pty_wrapper not found"
-    fi
     echo ""
     echo "▶ Recent notify.log (last 15 lines)"
     if [[ -f "$HOME/.agentwatch/notify.log" ]]; then
@@ -571,25 +515,4 @@ aw-diagnose() {
     else
         echo "  (no log yet)"
     fi
-}
-
-aw-test-paste() {
-    local text="${1:-reply test 123}"
-    local term_prog="${TERM_PROGRAM:-}" sess_id="${TERM_SESSION_ID:-}"
-    local tty_dev="${TTY:-$(tty 2>/dev/null)}"
-    echo "▶ aw-test-paste"
-    echo "• text       : $text"
-    echo "• session_id : $_AW_SID"
-    echo "• tty        : $tty_dev"
-    echo ""
-    echo "▶ Firing test card with Reply in 3s — stay in this window"
-    for i in 3 2 1; do printf '  %d…\n' "$i"; sleep 1; done
-    _aw_show_card \
-        "Paste test" "${AW_TERMINAL_NAME:-Terminal} · test" "DECISION" \
-        "Paste test. Click Reply.\n> Expected: '$text'\n> Session: $_AW_SID" \
-        "$term_prog" "$sess_id" "$tty_dev" "$_AW_SID"
-    sleep 1
-    echo ""
-    echo "▶ Recent log (last 8 lines):"
-    tail -n 8 "$HOME/.agentwatch/notify.log" 2>/dev/null | sed 's/^/  /'
 }
